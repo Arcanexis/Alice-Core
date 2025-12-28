@@ -47,7 +47,16 @@ class AliceAgent:
         self.snapshot_mgr.refresh() # 刷新快照
         self.index_text = self.snapshot_mgr.get_index_text()
         
+        loaded_files = [
+            self.prompt_path,
+            self.memory_path,
+            self.stm_path,
+            self.todo_path
+        ]
+        files_list_str = "\n".join([f"- {f}" for f in loaded_files])
+        
         full_system_content = (
+            f"【核心提示】：以下文件已全量加载到你的上下文中，你可以直接引用其内容：\n{files_list_str}\n\n"
             f"{self.system_prompt}\n\n"
             f"### 你的长期记忆 (来自 {self.memory_path})\n{self.memory_content}\n\n"
             f"### 你的短期记忆 (最近 7 天，来自 {self.stm_path})\n{self.stm_content}\n\n"
