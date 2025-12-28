@@ -1,0 +1,119 @@
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+import re
+import subprocess
+import sys
+
+load_dotenv()
+
+client = OpenAI(
+    base_url='https://api-inference.modelscope.cn/v1',
+    api_key=os.getenv('MODELSCOPE_API_KEY'),
+)
+
+SYSTEM_PROMPT = """你是一个具有自主发现能力的 AI 助手。
+你的当前工作目录包含一个 'skills' 文件夹，里面存放着各种增强技能。
+每个技能都是一个文件夹，包含一个 'SKILL.md' 文件。
+
+当你无法直接完成用户需求时（例如需要获取网页内容、搜索互联网等），你应该：
+1. 使用 `ls skills/` 查看有哪些可用技能。
+2. 阅读相关技能目录下的 `SKILL.md` 文件（例如 `cat skills/fetch/SKILL.md`）来了解如何使用该技能。
+3. 根据文档说明，通过执行 Shell 命令（如 `python skills/fetch/fetch.py "URL"`）来调用工具。
+
+你的交互协议如下：
+- 当你需要执行命令时，请将命令包裹在 ```bash ... ``` 代码块中。
+- 你可以一次执行一个或多个命令。
+- 系统会自动执行这些命令并将输出（stdout 和 stderr）反馈给你。
+- 在获得工具执行结果后，请结合结果给用户最终回答。
+
+请保持思考过程（thinking content），它能帮助你规划如何使用技能。
+"""
+
+def execute_command(command):
+    """执行 shell 命令并返回输出"""
+    print(f"\n> 正在执行命令: {command}")
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        output = result.stdout
+        if result.stderr:
+            output += f"\n错误输出:\n{result.stderr}"
+        return output if output else "[命令已执行，无输出]"
+    except Exception as e:
+        return f"执行出错: {str(e)}"
+
+def run_conversation(user_input):
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_input}
+    ]
+
+    while True:
+        # 1. 调用模型
+        extra_body = {"enable_thinking": True}
+        response = client.chat.completions.create(
+            model='deepseek-ai/DeepSeek-V3.2',
+            messages=messages,
+            stream=True,
+            extra_body=extra_body
+        )
+
+        full_content = ""
+        thinking_content = ""
+        done_thinking = False
+        
+        print("\n" + "="*20 + " DeepSeek 思考中 " + "="*20)
+        
+        for chunk in response:
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                t_chunk = getattr(delta, 'reasoning_content', '')
+                c_chunk = getattr(delta, 'content', '')
+                
+                if t_chunk:
+                    print(t_chunk, end='', flush=True)
+                    thinking_content += t_chunk
+                elif c_chunk:
+                    if not done_thinking:
+                        print('\n\n' + "="*20 + " 最终回答 " + "="*20 + '\n')
+                        done_thinking = True
+                    print(c_chunk, end='', flush=True)
+                    full_content += c_chunk
+
+        # 2. 检查是否需要执行命令
+        # 匹配 ```bash ... ``` 代码块
+        commands = re.findall(r'```bash\n(.*?)\n```', full_content, re.DOTALL)
+        
+        if not commands:
+            # 如果没有命令块，说明对话结束
+            break
+            
+        # 3. 执行命令并收集结果
+        # 将本次模型的输出加入历史
+        messages.append({"role": "assistant", "content": full_content})
+        
+        execution_results = []
+        for cmd in commands:
+            cmd_output = execute_command(cmd.strip())
+            execution_results.append(f"命令 `{cmd}` 的执行结果:\n{cmd_output}")
+        
+        # 将结果作为 user 消息反馈给模型
+        feedback = "\n\n".join(execution_results)
+        messages.append({"role": "user", "content": f"系统执行结果：\n{feedback}"})
+        
+        print("\n" + "-"*40)
+        print("已将执行结果反馈给模型，正在生成下一步响应...")
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        user_query = " ".join(sys.argv[1:])
+    else:
+        user_query = input("\n请输入您的需求: ")
+    
+    run_conversation(user_query)
