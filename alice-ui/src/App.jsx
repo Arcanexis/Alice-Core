@@ -42,15 +42,25 @@ function App() {
   const [tasks, setTasks] = useState('');
   const [skills, setSkills] = useState({});
   const [outputs, setOutputs] = useState([]);
+  const [isOutputsOpen, setIsOutputsOpen] = useState(true);
+  const [isSkillsOpen, setIsSkillsOpen] = useState(true);
   const chatEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (instant = false) => {
+    chatEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
   };
 
+  // 监听消息变化，确保滚动到底部
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // 处理输入框高度自适应或窗口变化时的滚动
+  useEffect(() => {
+    const handleResize = () => scrollToBottom(true);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     fetchStatus();
@@ -179,54 +189,70 @@ function App() {
           </section>
 
           <section>
-            <div className="flex items-center gap-2 mb-3 text-gray-100 font-bold px-2 text-sm uppercase tracking-wider">
-              <FileText size={16} className="text-indigo-400" />
-              <span>成果物 (Outputs)</span>
-            </div>
-            <div className="space-y-1 px-1">
-              {outputs.length > 0 ? (
-                outputs.map(file => (
-                  <div key={file.name} className="flex items-center justify-between p-2.5 hover:bg-gray-800 rounded-xl group transition-colors">
-                    <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 group-hover:bg-indigo-900/30 group-hover:text-indigo-400 transition-colors shrink-0">
-                        <FileText size={16} />
+            <button 
+              onClick={() => setIsOutputsOpen(!isOutputsOpen)}
+              className="w-full flex items-center justify-between mb-3 text-gray-100 font-bold px-2 text-sm uppercase tracking-wider hover:bg-gray-800/50 py-1 rounded transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-indigo-400" />
+                <span>成果物 (Outputs)</span>
+              </div>
+              {isOutputsOpen ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+            </button>
+            {isOutputsOpen && (
+              <div className="space-y-1 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                {outputs.length > 0 ? (
+                  outputs.map(file => (
+                    <div key={file.name} className="flex items-center justify-between p-2.5 hover:bg-gray-800 rounded-xl group transition-colors">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 group-hover:bg-indigo-900/30 group-hover:text-indigo-400 transition-colors shrink-0">
+                          <FileText size={16} />
+                        </div>
+                        <a href={file.url} target="_blank" rel="noreferrer" className="flex flex-col overflow-hidden hover:opacity-80 transition-opacity">
+                          <span className="text-xs text-gray-200 truncate font-semibold">{file.name}</span>
+                          <span className="text-[10px] text-gray-500">{(file.size / 1024).toFixed(1)} KB</span>
+                        </a>
                       </div>
-                      <a href={file.url} target="_blank" rel="noreferrer" className="flex flex-col overflow-hidden hover:opacity-80 transition-opacity">
-                        <span className="text-xs text-gray-200 truncate font-semibold">{file.name}</span>
-                        <span className="text-[10px] text-gray-500">{(file.size / 1024).toFixed(1)} KB</span>
-                      </a>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <a href={file.url} target="_blank" rel="noreferrer" className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-gray-700 rounded-md shadow-sm border border-transparent" title="预览">
+                          <ExternalLink size={14} />
+                        </a>
+                        <a href={file.url} download className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-gray-700 rounded-md shadow-sm border border-transparent" title="下载">
+                          <Download size={14} />
+                        </a>
+                      </div>
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <a href={file.url} target="_blank" rel="noreferrer" className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-gray-700 rounded-md shadow-sm border border-transparent" title="预览">
-                        <ExternalLink size={14} />
-                      </a>
-                      <a href={file.url} download className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-gray-700 rounded-md shadow-sm border border-transparent" title="下载">
-                        <Download size={14} />
-                      </a>
-                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs text-gray-500 text-center py-4 italic bg-gray-800/50 rounded-xl border border-dashed border-gray-700">
+                    尚未生成任何文件
                   </div>
-                ))
-              ) : (
-                <div className="text-xs text-gray-500 text-center py-4 italic bg-gray-800/50 rounded-xl border border-dashed border-gray-700">
-                  尚未生成任何文件
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section>
-            <div className="flex items-center gap-2 mb-3 text-gray-100 font-bold px-2 text-sm uppercase tracking-wider">
-              <Library size={16} className="text-indigo-400" />
-              <span>技能库 (Skills)</span>
-            </div>
-            <div className="grid grid-cols-1 gap-2 px-1">
-              {Object.keys(skills).map(name => (
-                <div key={name} className="p-3 bg-gray-800/50 border border-gray-800 rounded-xl shadow-sm hover:shadow-md transition-shadow group">
-                  <div className="font-bold text-gray-200 text-xs mb-1 group-hover:text-indigo-400 transition-colors">{name}</div>
-                  <div className="text-[10px] text-gray-500 line-clamp-2 leading-relaxed">{skills[name].description}</div>
-                </div>
-              ))}
-            </div>
+            <button 
+              onClick={() => setIsSkillsOpen(!isSkillsOpen)}
+              className="w-full flex items-center justify-between mb-3 text-gray-100 font-bold px-2 text-sm uppercase tracking-wider hover:bg-gray-800/50 py-1 rounded transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Library size={16} className="text-indigo-400" />
+                <span>技能库 (Skills)</span>
+              </div>
+              {isSkillsOpen ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+            </button>
+            {isSkillsOpen && (
+              <div className="grid grid-cols-1 gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                {Object.keys(skills).map(name => (
+                  <div key={name} className="p-3 bg-gray-800/50 border border-gray-800 rounded-xl shadow-sm hover:shadow-md transition-shadow group">
+                    <div className="font-bold text-gray-200 text-xs mb-1 group-hover:text-indigo-400 transition-colors">{name}</div>
+                    <div className="text-[10px] text-gray-500 line-clamp-2 leading-relaxed">{skills[name].description}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       </div>
@@ -251,20 +277,20 @@ function App() {
                   {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
                 </div>
                 
-                <div className="space-y-4 flex-1 overflow-hidden">
+                <div className="space-y-4 flex-1 min-w-0">
                   {msg.role === 'user' ? (
-                    <div className="bg-gray-800 text-gray-100 px-5 py-3 rounded-2xl border border-gray-700 shadow-sm leading-relaxed whitespace-pre-wrap">
+                    <div className="bg-gray-800 text-gray-100 px-5 py-3 rounded-2xl border border-gray-700 shadow-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
                       {msg.content}
                     </div>
                   ) : (
                     <>
                       {/* 任务追踪时间线 (Steps Trace) */}
                       {msg.steps && msg.steps.length > 0 && (
-                        <div className="space-y-2">
+                        <div className="space-y-2 min-w-0">
                           {msg.steps.map((step, idx) => (
-                            <div key={idx} className="group/step">
+                            <div key={idx} className="group/step min-w-0">
                                 <details className="bg-gray-900/40 rounded-xl border border-gray-800/50 overflow-hidden transition-all" open={!msg.isComplete && idx === msg.steps.length - 1}>
-                                    <summary className="px-3 py-2 text-[11px] text-gray-500 cursor-pointer hover:bg-gray-800/50 flex items-center justify-between select-none font-mono">
+                                    <summary className="px-3 py-2 text-[11px] text-gray-500 cursor-pointer hover:bg-gray-800/50 flex items-center justify-between select-none font-mono overflow-hidden">
                                         <div className="flex items-center gap-3">
                                             <div className={cn(
                                                 "w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold",
@@ -283,17 +309,17 @@ function App() {
                                         </div>
                                         <ChevronDown size={14} className="opacity-0 group-hover/step:opacity-100 transition-opacity" />
                                     </summary>
-                                    <div className="p-4 bg-black/20 space-y-3 border-t border-gray-800/50">
+                                    <div className="p-4 bg-black/20 space-y-3 border-t border-gray-800/50 overflow-hidden">
                                         {step.thinking && (
-                                            <div className="text-xs text-gray-400 italic font-mono leading-relaxed bg-gray-950/50 p-3 rounded-lg border border-gray-800">
+                                            <div className="text-xs text-gray-400 italic font-mono leading-relaxed bg-gray-950/50 p-3 rounded-lg border border-gray-800 break-words overflow-hidden">
                                                 <div className="text-[9px] text-indigo-500 mb-1 font-bold"># THOUGHT_PROCESS</div>
                                                 {step.thinking}
                                             </div>
                                         )}
                                         {step.content && (
-                                            <div className="text-xs text-gray-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                                            <div className="text-xs text-gray-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800 break-words overflow-hidden">
                                                 <div className="text-[9px] text-emerald-500 mb-1 font-bold"># INTENT</div>
-                                                <ReactMarkdown className="prose prose-invert prose-xs max-w-none">{step.content}</ReactMarkdown>
+                                                <ReactMarkdown className="prose prose-invert prose-xs max-w-none break-words">{step.content}</ReactMarkdown>
                                             </div>
                                         )}
                                         {step.executionResults.length > 0 && (
@@ -324,11 +350,11 @@ function App() {
                       {/* 最终回答 (Final Answer) */}
                       {(msg.finalAnswer || (!msg.steps && msg.content)) && (
                         <div className={cn(
-                            "rounded-2xl px-5 py-4 shadow-xl leading-relaxed border animate-in fade-in zoom-in-95 duration-500",
+                            "rounded-2xl px-5 py-4 shadow-xl leading-relaxed border animate-in fade-in zoom-in-95 duration-500 overflow-hidden min-w-0",
                             "bg-gray-900 text-gray-100 border-gray-800"
                         )}>
                             <ReactMarkdown 
-                            className="prose prose-sm max-w-none prose-invert prose-headings:font-bold prose-a:text-indigo-400 prose-pre:p-0 prose-pre:bg-transparent prose-pre:m-0"
+                            className="prose prose-sm max-w-none prose-invert prose-headings:font-bold prose-a:text-indigo-400 prose-pre:p-0 prose-pre:bg-transparent prose-pre:m-0 break-words"
                             components={{
                                 code: ({ node, inline, className, children, ...props }) => {
                                 return inline ? (

@@ -9,5 +9,19 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f3f4f6;
+  background-color: #030712; /* gray-950 */
+  overflow-x: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 强制所有 prose 元素不超出容器 */
+.prose {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.prose pre {
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
 }
