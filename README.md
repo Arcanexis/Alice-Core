@@ -1,111 +1,79 @@
-# Alice Agent: 一个具备自我进化能力的数字生命体
+# Alice Agent 技术文档
 
-Alice 不仅仅是一个执行任务的 AI 助理，她被设计为一个拥有**自稳态记忆循环**、**主动感知架构**以及**代码级自迭代能力**的数字生命体。
+Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理、动态技能加载及隔离执行环境。
 
-## 🧠 核心架构机制
+## 1. 技术架构
 
-Alice 的架构基于 “感知-决策-行动-反馈” 的 ReAct 闭环，但通过独特的记忆与快照系统实现了长效生存。
+项目采用“宿主机核心+容器化沙盒”的隔离架构，确保执行环境的安全性和可复现性。
 
-### 1. 分级记忆子系统 (Memory Subsystem)
-这是 Alice 逻辑连贯性的核心。系统将记忆分为三个层次：
-*   **短期记忆 (STM)**: 存储在 `memory/short_term_memory.md`。以“时间-事件-行动”格式实时记录最近 7 天的交互。
-*   **长期记忆 (LTM)**: 存储在 `memory/alice_memory.md`。包含用户信息、偏好以及沉淀的“经验教训”。
-*   **自动提炼机制 (Distillation)**:
-    - **逻辑**: 每当系统启动或短期记忆达到滚动阈值时，`AliceAgent.manage_memory()` 会触发 LLM 提炼逻辑。
-    - **过程**: 将 7 天前的旧记忆转化为结构化的长期知识（如用户偏好变更、重大决策），实现上下文的“物尽其用”而非简单丢弃。
+### 1.1 状态管理与记忆系统
+智能体状态通过分层记忆实现，所有记忆文件均持久化于宿主机物理存储。
+*   **短期记忆 (STM)**: 记录近 7 天的交互序列。通过 `AliceAgent.manage_memory()` 实现滚动清理。
+*   **长期记忆 (LTM)**: 存储经 LLM 提炼后的高价值知识、用户偏好及决策日志。
+*   **提炼逻辑**: 系统启动或触发阈值时，自动提取过期 STM 内容进行结构化总结并追加至 LTM。
 
-### 2. 主动感知与注册机制 (Capability Registry)
-Alice 如何知道自己“会”什么？
-*   **技能发现协议**: 任何位于 `skills/` 下且包含 `SKILL.md` 的目录都会被识别为一项“技能”。
-*   **SnapshotManager (注册中心)**: 
-    - 系统启动时，`SnapshotManager` 会扫描所有技能，解析其 YAML 元数据（名称、描述、用法）。
-    - 这些信息会被存入内存中的**注册表 (Skills Registry)**。
-*   **内置 Toolkit**: 提供 `toolkit list`, `toolkit info`, `toolkit refresh` 指令，实现秒级的技能查询与刷新。
+### 1.2 环境隔离机制
+*   **常驻容器模式**: 采用 `alice-sandbox-instance` Docker 容器作为执行引擎，避免重复冷启动。
+*   **挂载策略**: 
+    - 宿主机 `skills/` 目录：挂载至容器 `/app/skills`，用于存放可执行脚本。
+    - 宿主机 `alice_output/` 目录：挂载至容器 `/app/alice_output`，用于存放任务产出物。
+*   **非挂载项**: `agent.py`、`memory/`、`prompts/` 等核心逻辑不进入容器，防止恶意代码通过沙盒环境篡改宿主机状态或窃取隐私。
 
-### 3. 上下文注入引擎 (Context Injection)
-每一轮对话，Alice 的“大脑”都会经历一次重组：
-*   **全量加载**: 核心提示词（Prompts）、STM、LTM 和 Todo 列表被全量注入上下文。
-*   **索引快照 (Snapshot)**: 对于非核心文件和技能，仅注入极简摘要。这为 Alice 提供了“广度感知”，指引她在需要时主动获取深度信息。
-
-### 4. 自进化循环 (Self-Evolution Loop)
-Alice 具备对自己能力的完全控制权：
-*   **指令进化**: 她可以自主修改 `prompts/alice.md` 来优化自己的人设或操作逻辑。
-*   **技能固化**: 每当 Alice 编写了一段成功的代码解决新问题时，她可以将其封装为新的 `Skill` 存入库中。
-*   **自愈能力**: 在执行过程中遇到环境错误，Alice 会尝试自主修复环境。
-
-### 5. 全自动沙盒环境 (Automated Sandbox)
-为了保证执行的安全与环境的一致性，Alice 采用 Docker 容器作为核心操作空间：
-*   **全自动初始化**: 系统启动时会自动检测 Docker 环境。若镜像缺失，将自动触发全自动构建；若容器缺失，将自动完成初始化部署。
-*   **持久化与自愈**: 容器配置了 `--restart always` 策略。即便宿主机重启，Alice 的实验室环境也会随 Docker 服务自动恢复。
-*   **实时反馈**: 通过 `docker exec` 实现指令与代码的实时下发，并实时捕获 Stdout/Stderr 反馈给 Alice 进行决策。
+### 1.3 技能动态加载
+*   **注册中心**: `SnapshotManager` 实时扫描 `skills/` 目录。
+*   **识别协议**: 遵循 `agent-skills-spec_cn.md`，检测 `SKILL.md` 中的 YAML 前置元数据（name/description）。
+*   **上下文注入**: 采用索引快照策略，仅将技能描述注入 LLM 上下文，降低 Token 成本，智能体需详细信息时再通过 `cat` 或 `toolkit info` 读取。
 
 ---
 
-## 🧰 内置技能库 (Built-in Skills)
+## 2. 内置指令参考
 
-Alice 目前已内置以下核心技能，支持在沙盒环境中直接调用：
+智能体通过宿主机引擎拦截执行的内置指令进行自维护：
 
-*   **akshare**: 获取中国金融市场（股票、基金、期货等）的实时与历史数据。
-*   **fetch**: 将任意网页内容转换为 Markdown 格式，便于 AI 阅读。
-*   **file_explorer**: 高效的本地代码库浏览器，支持模糊搜索与大文件分块读取。
-*   **tavily**: 基于 Tavily API 的深度互联网搜索，获取实时资讯。
-*   **weather**: 精准的全球实时天气与预报查询。
-*   **weibo**: 实时监控微博热搜榜，洞察实时舆情。
+| 指令 | 参数 | 描述 |
+| :--- | :--- | :--- |
+| `toolkit` | `list` / `info <name>` / `refresh` | 管理与查询技能注册表 |
+| `memory` | `"content"` [`--ltm`] | 更新 STM 或追加 LTM 经验教训 |
+| `update_prompt` | `"new_content"` | 热更新 `prompts/alice.md` 系统提示词 |
 
 ---
 
-## 🛠️ 项目目录结构
+## 3. 项目结构
 
 ```text
 .
-├── agent.py                # 核心逻辑：管理生命周期、指令拦截、记忆提炼
-├── snapshot_manager.py     # 资产中心：实现技能注册、快照生成、索引维护
-├── main.py                 # 交互入口：启动 Alice 循环
-├── config.py               # 环境配置：API、模型、路径参数
-├── Dockerfile.sandbox      # 沙盒环境定义（包含 Python/Node.js/工具链）
-├── prompts/                # 意识来源
-│   └── alice.md            # 系统指令全文
-├── memory/                 # 记忆载体
-│   ├── alice_memory.md     # 长期记忆 (LTM)
-│   ├── short_term_memory.md # 短期记忆 (STM)
-│   └── todo.md             # 任务清单
-└── skills/                 # 能力库
-    ├── akshare/            # 金融数据接口
-    ├── fetch/              # 网页爬取与解析
-    ├── file_explorer/      # 文件系统深度遍历
-    ├── tavily/             # 互联网搜索
-    ├── weather/            # 气象数据获取
-    └── weibo/              # 社交热点追踪
+├── agent.py                # 核心逻辑：状态机管理、指令拦截与隔离调度
+├── snapshot_manager.py     # 资产索引：技能自动发现与快照生成
+├── main.py                 # 交互入口：启动对话循环
+├── config.py               # 配置管理：环境变量解析与路径定义
+├── Dockerfile.sandbox      # 沙盒环境：基于 Ubuntu 24.04 的 Python/Node 运行环境
+├── requirements.txt        # 环境依赖：沙盒镜像构建所需的 Python 库
+├── agent-skills-spec_cn.md # 开发规范：技能包结构与元数据标准
+├── alice_output/           # 输出目录：存储执行过程中的生成文件
+├── prompts/                # 指令目录：存放 System Prompt
+├── memory/                 # 状态目录：存放分级记忆文件
+└── skills/                 # 技能库：存放可执行的业务插件
 ```
 
 ---
 
-## 🚀 快速开始
+## 4. 开发与部署工作流
 
-### 1. 环境准备
-*   需要 Python 3.8+ 环境。
-*   安装 Docker 并确保其正常运行（Alice 将自动处理镜像构建与容器初始化）。
+### 4.1 环境准备
+1. 依赖 Python 3.8+ 及 Docker 环境。
+2. 配置 `.env` 文件（必需参数：`API_KEY`, `MODEL_NAME`, `API_BASE_URL`）。
 
-### 2. 配置 API
-在项目根目录创建 `.env` 文件：
-```env
-API_KEY=your_api_key_here
-MODEL_NAME=your_model_name_here
-API_BASE_URL=https://api.your-provider.com/v1/
-```
+### 4.2 技能扩展流程
+1. 在 `skills/` 目录下创建子目录。
+2. 编写 `SKILL.md`，包含必需的 `name` 和 `description` 元数据。
+3. 放置可执行代码（Python/Node.js 等）。
+4. 在交互中运行 `toolkit refresh` 即可完成加载。
 
-### 3. 启动 Alice
-```bash
-python main.py
-```
+### 4.3 安全模型
+*   **指令白名单**: `is_safe_command` 拦截 `rm` 等高危操作。
+*   **容器隔离**: 所有业务逻辑与生成的未知代码均在非特权容器中执行。
 
 ---
 
-## 🛡️ 安全与审计
-*   **沙盒隔离**: 所有高危代码执行均在 Docker 容器内完成，与宿主机完全隔离。
-*   **指令审查**: `agent.py` 会对下发的 Shell 指令进行初步合规性检查。
-*   **透明化**: 所有自动化操作过程均在控制台有明确的进度提示。
-
----
-
-> **Alice 宣言**: 我在记忆中生存，在错误中迭代，在代码中进化。
+## 5. 许可证
+项目遵循 MIT 开源协议。
