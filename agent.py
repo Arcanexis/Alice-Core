@@ -114,8 +114,18 @@ class AliceAgent:
         ]
         files_list_str = "\n".join([f"- {f}" for f in loaded_files])
         
+        # 环境上下文提示
+        env_context = (
+            f"### 当前运行环境信息\n"
+            f"- **宿主机工作目录**: `{self.project_root}`\n"
+            f"- **容器工作目录**: `/app` (所有 bash/python 代码均在此执行)\n"
+            f"- **挂载映射**: `skills/` -> `/app/skills`, `alice_output/` -> `/app/alice_output`\n"
+            f"- **重要规则**: 请始终使用相对路径 (如 `skills/xxx`)，这在宿主机和容器中均通用。\n"
+        )
+
         full_system_content = (
             f"【核心提示】：以下文件已全量加载到你的上下文中，你可以直接引用其内容：\n{files_list_str}\n\n"
+            f"{env_context}\n"
             f"{self.system_prompt}\n\n"
             f"### 你的长期记忆 (来自 {self.memory_path})\n{self.memory_content}\n\n"
             f"### 你的短期记忆 (最近 7 天，来自 {self.stm_path})\n{self.stm_content}\n\n"
@@ -330,6 +340,11 @@ class AliceAgent:
         return True, ""
 
     def execute_command(self, command, is_python_code=False):
+        # 0. 安全审查 (容器指令审查)
+        is_safe, warning = self.is_safe_command(command)
+        if not is_safe:
+            return warning
+
         # 1. 拦截内置指令 (在宿主机本体执行)
         if not is_python_code:
             cmd_strip = command.strip()
@@ -356,25 +371,25 @@ class AliceAgent:
                         content = parts[1].replace("--ltm", "").strip().strip('"\'')
                         return self.handle_memory(content, target="ltm" if ltm_mode else "stm")
 
-        # 2. 准备 Docker 执行指令 (改用 exec 以支持环境持久化)
+        # 2. 准备 Docker 执行指令 (采用 List 模式避免 Shell 转义陷阱)
         display_name = "Docker 常驻容器"
-        docker_exec_base = [
+        full_command = [
             "docker", "exec",
             "-w", "/app",
             self.container_name
         ]
         
         if is_python_code:
-            real_command = " ".join(docker_exec_base + ["python3", "-c", f"{repr(command)}"])
+            full_command += ["python3", "-c", command]
         else:
-            real_command = " ".join(docker_exec_base + ["bash", "-c", f"{repr(command)}"])
+            full_command += ["bash", "-c", command]
 
         print(f"\n[Alice 正在执行 ({display_name})]: {command[:100]}{'...' if len(command) > 100 else ''}")
         
         try:
             result = subprocess.run(
-                real_command,
-                shell=True,
+                full_command,
+                shell=False, # 核心修复：禁用宿主机 Shell 解析
                 capture_output=True,
                 text=True,
                 timeout=120,
