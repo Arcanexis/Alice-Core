@@ -7,16 +7,17 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 项目采用“宿主机核心+容器化沙盒”的隔离架构，确保执行环境的安全性和可复现性。
 
 ### 1.1 状态管理与记忆系统
-智能体状态通过分层记忆实现，所有记忆文件均持久化于宿主机物理存储。
-*   **短期记忆 (STM)**: 记录近 7 天的交互序列。通过 `AliceAgent.manage_memory()` 实现滚动清理。
-*   **长期记忆 (LTM)**: 存储经 LLM 提炼后的高价值知识、用户偏好及决策日志。
-*   **提炼逻辑**: 系统启动或触发阈值时，自动提取过期 STM 内容进行结构化总结并追加至 LTM。
+智能体状态通过三层分级记忆实现，所有记忆文件均持久化于宿主机物理存储。
+*   **短期记忆 (STM)**: 记录近 7 天的交互序列。系统启动时通过 `AliceAgent.manage_memory()` 实现滚动清理。
+*   **长期记忆 (LTM)**: 存储经 LLM 提炼后的高价值知识、用户偏好。通过 `memory --ltm` 指令可手动追加经验教训。
+*   **任务清单 (Todo)**: 存储当前活跃的任务及其完成状态，辅助智能体维持长线任务目标。
+*   **提炼逻辑**: 系统启动时，自动提取过期 STM 内容（超过 7 天）进行结构化总结并追加至 LTM。
 
 ### 1.2 环境隔离机制
-*   **常驻容器模式**: 采用 `alice-sandbox-instance` Docker 容器作为执行引擎，避免重复冷启动。
+*   **自动化容器管理**: 系统启动时自动检测 `alice-sandbox` 镜像，若缺失则基于 `Dockerfile.sandbox` 自动构建。同时自动唤醒或初始化 `alice-sandbox-instance` 常驻容器。
 *   **挂载策略**: 
-    - 宿主机 `skills/` 目录：挂载至容器 `/app/skills`，用于存放可执行脚本。
-    - 宿主机 `alice_output/` 目录：挂载至容器 `/app/alice_output`，用于存放任务产出物。
+    - 宿主机 `skills/` 目录：挂载至容器 `/app/skills`（读写），用于存放可执行脚本。
+    - 宿主机 `alice_output/` 目录：挂载至容器 `/app/alice_output`（读写），用于存放任务产出物。
 *   **非挂载项**: `agent.py`、`memory/`、`prompts/` 等核心逻辑不进入容器，防止恶意代码通过沙盒环境篡改宿主机状态或窃取隐私。
 
 ### 1.3 技能动态加载
@@ -28,13 +29,13 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 
 ## 2. 内置指令参考
 
-智能体通过宿主机引擎拦截执行的内置指令进行自维护：
+智能体通过宿主机引擎拦截并执行以下指令。这些指令在宿主机环境运行，而非沙盒容器：
 
-| 指令 | 参数 | 描述 |
+| 指令 | 参数示例 | 描述 |
 | :--- | :--- | :--- |
-| `toolkit` | `list` / `info <name>` / `refresh` | 管理与查询技能注册表 |
-| `memory` | `"content"` [`--ltm`] | 更新 STM 或追加 LTM 经验教训 |
-| `update_prompt` | `"new_content"` | 热更新 `prompts/alice.md` 系统提示词 |
+| `toolkit` | `list` / `info <name>` / `refresh` | 管理技能注册表。`refresh` 用于实时扫描 `skills/` 目录 |
+| `memory` | `"内容"` [`--ltm`] | 默认更新 STM。若带 `--ltm` 则追加至 LTM 的“经验教训”小节 |
+| `update_prompt` | `"新的人设内容"` | 热更新 `prompts/alice.md` 系统提示词 |
 
 ---
 
@@ -46,13 +47,17 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 ├── snapshot_manager.py     # 资产索引：技能自动发现与快照生成
 ├── main.py                 # 交互入口：启动对话循环
 ├── config.py               # 配置管理：环境变量解析与路径定义
+├── .env.example            # 配置模板：环境变量示例文件
 ├── Dockerfile.sandbox      # 沙盒环境：基于 Ubuntu 24.04 的 Python/Node 运行环境
-├── requirements.txt        # 环境依赖：沙盒镜像构建所需的 Python 库
+├── requirements.txt        # 环境依赖：基础镜像构建所需的 Python 库
 ├── agent-skills-spec_cn.md # 开发规范：技能包结构与元数据标准
-├── alice_output/           # 输出目录：存储执行过程中的生成文件
-├── prompts/                # 指令目录：存放 System Prompt
+├── alice_output/           # 输出目录：存储任务执行过程中的生成文件（已挂载）
+├── prompts/                # 指令目录：存放系统提示词 (alice.md)
 ├── memory/                 # 状态目录：存放分级记忆文件
-└── skills/                 # 技能库：存放可执行的业务插件
+│   ├── alice_memory.md     # 长期记忆 (LTM)
+│   ├── short_term_memory.md # 短期记忆 (STM)
+│   └── todo.md             # 任务清单 (Todo)
+└── skills/                 # 技能库：存放可执行的业务插件（已挂载）
 ```
 
 ---
@@ -60,8 +65,13 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 ## 4. 开发与部署工作流
 
 ### 4.1 环境准备
-1. 依赖 Python 3.8+ 及 Docker 环境。
-2. 配置 `.env` 文件（必需参数：`API_KEY`, `MODEL_NAME`, `API_BASE_URL`）。
+1. **基础环境**: 确保已安装 Python 3.8+ 及 Docker。
+2. **安装依赖**: 在宿主机安装核心引擎所需的最小依赖：
+   ```bash
+   pip install openai python-dotenv
+   ```
+   *(注：业务相关的复杂依赖如 pandas, matplotlib 等已在 Docker 沙盒中预装)*
+3. **配置文件**: 参考 `.env.example` 创建 `.env` 文件并填入必需参数。
 
 ### 4.2 技能扩展流程
 1. 在 `skills/` 目录下创建子目录。
