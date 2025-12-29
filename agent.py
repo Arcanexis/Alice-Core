@@ -251,13 +251,21 @@ class AliceAgent:
         return "未知 toolkit 指令。用法: `toolkit list`, `toolkit info <skill_name>`, `toolkit refresh`"
 
     def handle_memory(self, content, target="stm"):
-        """处理内置 memory 指令"""
+        """处理内置 memory 指令，确保写入宿主机 memory/ 目录"""
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M")
         
         target_path = self.stm_path if target == "stm" else self.memory_path
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        # 清洗内容，避免重复的日期前缀
+        clean_content = content.strip()
+        # 匹配 [2025-12-29] 或 2025-12-29 这种格式
+        if re.match(r'^\[?\d{4}-\d{2}-\d{2}\]?', clean_content):
+            entry_prefix = "" 
+        else:
+            entry_prefix = f"[{date_str}] "
 
         try:
             if target == "stm":
@@ -273,7 +281,7 @@ class AliceAgent:
                 with open(target_path, "a", encoding="utf-8") as f:
                     if not has_date_header:
                         f.write(f"\n## {date_str}\n")
-                    f.write(f"- [{time_str}] {content.strip()}\n")
+                    f.write(f"- [{time_str}] {clean_content}\n")
                 return f"已成功更新短期记忆。"
             else:
                 # LTM 经验教训追加逻辑
@@ -285,10 +293,11 @@ class AliceAgent:
                     full_text = f.read()
 
                 lessons_header = "## 经验教训"
-                entry = f"- [{date_str}] {content.strip()}\n"
+                entry = f"- {entry_prefix}{clean_content}\n"
 
                 if lessons_header in full_text:
                     parts = full_text.split(lessons_header)
+                    # 插入到标题下方
                     new_content = parts[0] + lessons_header + "\n" + entry + parts[1].lstrip()
                     with open(target_path, "w", encoding="utf-8") as f:
                         f.write(new_content)
@@ -300,7 +309,10 @@ class AliceAgent:
             return f"更新记忆失败: {str(e)}"
 
     def is_safe_command(self, command):
-        # 既然在常驻容器内运行，放开所有限制
+        """安全审查：仅拦截危险的 rm 指令"""
+        cmd_strip = command.strip().lower()
+        if cmd_strip.startswith("rm ") or " rm " in cmd_strip:
+            return False, "为了系统安全，禁止在容器内使用 rm 指令。如需删除文件，请通过其他方式操作。"
         return True, ""
 
     def execute_command(self, command, is_python_code=False):
