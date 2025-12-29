@@ -40,7 +40,7 @@ class AliceAgent:
         self._refresh_system_message()
 
     def _ensure_docker_environment(self):
-        """确保 Docker 环境就绪，实现全自动初始化与唤醒"""
+        """确保 Docker 环境就绪，实现核心隔离与自动化唤醒"""
         try:
             # 1. 检查 Docker 引擎
             res = subprocess.run("docker --version", shell=True, capture_output=True)
@@ -65,24 +65,29 @@ class AliceAgent:
                     sys.exit(1)
                 print(f"[系统]: 镜像 {self.docker_image} 构建成功。")
 
-            # 3. 检查/启动常驻容器
+            # 3. 检查/启动常驻容器 (最小化权限挂载模式)
             res = subprocess.run(f"docker ps -a --filter name={self.container_name} --format '{{{{.Status}}}}'", shell=True, capture_output=True, text=True)
             status = res.stdout.lower()
 
             if not status:
-                # 容器不存在，创建并启动
-                print(f"[系统]: 正在初始化 Alice 常驻实验室容器...")
+                # 确保关键目录存在 (用于物理隔离挂载)
+                os.makedirs(os.path.join(self.project_root, "skills"), exist_ok=True)
+                os.makedirs(config.ALICE_OUTPUT_DIR, exist_ok=True)
+
+                print(f"[系统]: 正在初始化 Alice 常驻实验室容器 (最小权限隔离模式)...")
                 start_cmd = [
                     "docker", "run", "-d",
                     "--name", self.container_name,
-                    "--restart", "always", # 确保系统重启后容器自动启动
-                    "-v", f"{self.project_root}:/app",
+                    "--restart", "always",
+                    # 仅同步技能库和输出目录，隔离记忆、人设及源代码
+                    "-v", f"{os.path.join(self.project_root, 'skills')}:/app/skills",
+                    "-v", f"{os.path.abspath(config.ALICE_OUTPUT_DIR)}:/app/alice_output",
                     "-w", "/app",
                     self.docker_image,
-                    "tail", "-f", "/dev/null" # 保持运行
+                    "tail", "-f", "/dev/null"
                 ]
                 subprocess.run(" ".join(start_cmd), shell=True, check=True)
-                print(f"[系统]: 容器已成功初始化并设置为开机自启。")
+                print(f"[系统]: 容器已成功初始化。记忆与人设文件已实现物理隔离保护。")
             elif "up" not in status:
                 # 容器存在但没运行，启动它
                 print(f"[系统]: 正在唤醒 Alice 常驻实验室容器...")
@@ -220,6 +225,15 @@ class AliceAgent:
             print(f"加载文件 {path} 失败: {e}")
             return default_msg
 
+    def handle_update_prompt(self, content):
+        """处理内置 update_prompt 指令，在宿主机更新人设文件"""
+        try:
+            with open(self.prompt_path, "w", encoding="utf-8") as f:
+                f.write(content.strip())
+            return "已成功更新宿主机人设文件 (prompts/alice.md)。新指令将在下一轮对话生效。"
+        except Exception as e:
+            return f"更新人设文件失败: {str(e)}"
+
     def handle_toolkit(self, args):
         """处理内置 toolkit 指令（基于注册机制）"""
         if not args or args[0] == "list":
@@ -316,11 +330,20 @@ class AliceAgent:
         return True, ""
 
     def execute_command(self, command, is_python_code=False):
-        # 1. 拦截内置指令
+        # 1. 拦截内置指令 (在宿主机本体执行)
         if not is_python_code:
             cmd_strip = command.strip()
             if cmd_strip.startswith("toolkit"):
                 return self.handle_toolkit(cmd_strip.split()[1:])
+            
+            if cmd_strip.startswith("update_prompt"):
+                # 提取 update_prompt 之后的所有内容
+                parts = cmd_strip.split(None, 1)
+                if len(parts) > 1:
+                    content = parts[1].strip().strip('"\'')
+                    return self.handle_update_prompt(content)
+                return "错误: update_prompt 需要提供新的提示词内容。"
+
             if cmd_strip.startswith("memory"):
                 # 极简解析: memory "content" [--ltm]
                 ltm_mode = "--ltm" in cmd_strip
