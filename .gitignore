@@ -1,10 +1,10 @@
 .env
 __pycache__/
 *.py[cod]
-.venv_alice/
 alice_output/
 
 # UI related
 alice-ui/node_modules/
 alice-ui/dist/
 alice-ui/.vite/
+.clinerules
