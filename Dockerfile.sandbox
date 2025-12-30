@@ -41,11 +41,16 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # 4. 在虚拟环境中安装/升级 Python 基础库
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# 5. 迁移项目核心 Python 依赖
+# 5. 安装 Playwright 及其系统依赖 (为了能跑 Chromium)
+RUN pip install --no-cache-dir playwright \
+    && playwright install-deps chromium \
+    && playwright install chromium
+
+# 6. 迁移项目核心 Python 依赖
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# 6. 环境变量配置
+# 7. 环境变量配置
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONUNBUFFERED=1

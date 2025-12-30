@@ -98,3 +98,6 @@
 - [09:09] 发现 market-research-html 技能的图表生成依赖两个缺失技能：scientific-schematics 和 generate-image。导致之前生成的英伟达报告图表都是 70 字节的空文件。需要重新设计图表生成方案。
 - [09:25] 成功修复 market-research-html 技能的图表生成问题。创建了新的 generate_charts.py 脚本，使用 matplotlib 直接生成所有 16 张专业图表，不再依赖缺失的 scientific-schematics 和 generate-image 技能。英伟达市场研究报告的所有图表现在都是真实可用的 PNG 文件，总大小 792KB。
 - [09:58] 用户删除了旧的 ppt skill，将设计一个更好的版本。
+- [10:24] 用户询问容器内是否有浏览器。已告知存在 Playwright 无头浏览器，支持动态抓取、交互模拟和截图功能。
+- [10:41] 成功测试 Playwright 浏览器技能，访问百度首页并完成截图。确认容器内可正常进行动态网页抓取和自动化操作。
+- [10:45] 成功使用 Playwright 浏览器访问B站，获取到
