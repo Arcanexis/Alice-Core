@@ -30,6 +30,7 @@ class AliceAgent:
         
         # 内存快照管理器
         self.snapshot_mgr = SnapshotManager()
+        self.interrupted = False
         
         # 确保输出目录存在
         os.makedirs(config.ALICE_OUTPUT_DIR, exist_ok=True)
@@ -332,6 +333,10 @@ class AliceAgent:
         except Exception as e:
             return f"更新记忆失败: {str(e)}"
 
+    def interrupt(self):
+        """发送中断信号"""
+        self.interrupted = True
+
     def is_safe_command(self, command):
         """安全审查：仅拦截危险的 rm 指令"""
         cmd_strip = command.strip().lower()
@@ -470,10 +475,16 @@ class AliceAgent:
 
     def stream_chat(self, user_input):
         """流式对话生成器，支持 UI 实时展示，并在控制台同步打印日志"""
+        self.interrupted = False # 重置中断状态
         self.messages.append({"role": "user", "content": user_input})
         step_count = 0
         
         while True:
+            if self.interrupted:
+                yield {"type": "system", "content": "任务已被用户手动终止。"}
+                yield {"type": "final_answer", "content": "任务已终止。"}
+                break
+
             step_count += 1
             yield {"type": "start_step", "step": step_count}
             

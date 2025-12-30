@@ -52,6 +52,11 @@ os.makedirs(config.ALICE_OUTPUT_DIR, exist_ok=True)
 # 挂载输出目录为静态资源
 app.mount("/outputs", StaticFiles(directory=config.ALICE_OUTPUT_DIR), name="outputs")
 
+@app.post("/api/interrupt")
+async def interrupt():
+    alice.interrupt()
+    return {"status": "ok"}
+
 @app.post("/api/chat")
 async def chat(request: Request):
     data = await request.json()

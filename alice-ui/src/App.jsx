@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
 import axios from 'axios';
-import { Send, Bot, User, ChevronDown, ChevronUp, ScrollText, Library, Terminal, FileText, Download, ExternalLink, Code2, AlertCircle, CheckCircle2, FolderOpen, Folder } from 'lucide-react';
+import { Send, Bot, User, ChevronDown, ChevronUp, ScrollText, Library, Terminal, FileText, Download, ExternalLink, Code2, AlertCircle, CheckCircle2, FolderOpen, Folder, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -129,7 +129,7 @@ const FileTreeItem = memo(({ item, depth = 0 }) => {
 });
 
 // 输入区域组件，用于隔离渲染压力
-const ChatInput = memo(({ onSend, isLoading }) => {
+const ChatInput = memo(({ onSend, onInterrupt, isLoading }) => {
   const [input, setInput] = useState('');
 
   const handleSubmit = (e) => {
@@ -140,29 +140,41 @@ const ChatInput = memo(({ onSend, isLoading }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder={isLoading ? "Alice 正在全神贯注思考中..." : "问问 Alice，或要求她执行任务..."}
-        disabled={isLoading}
-        className="w-full pl-5 pr-14 py-4 bg-gray-900 border border-gray-800 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 focus:bg-gray-900 transition-all disabled:bg-gray-950 disabled:text-gray-600 text-gray-100 shadow-inner"
-      />
-      <button
-        type="submit"
-        disabled={isLoading || !input.trim()}
-        className="absolute right-2.5 top-2.5 bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all disabled:bg-gray-800 shadow-none active:scale-95"
-      >
-        <Send size={20} />
-      </button>
-    </form>
+    <div className="max-w-4xl mx-auto flex items-center gap-3">
+      <form onSubmit={handleSubmit} className="flex-1 relative group">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={isLoading ? "Alice 正在全神贯注思考中..." : "问问 Alice，或要求她执行任务..."}
+          disabled={isLoading}
+          className="w-full pl-5 pr-14 py-4 bg-gray-900 border border-gray-800 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 focus:bg-gray-900 transition-all disabled:bg-gray-950 disabled:text-gray-600 text-gray-100 shadow-inner"
+        />
+        <button
+          type="submit"
+          disabled={isLoading || !input.trim()}
+          className="absolute right-2.5 top-2.5 bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all disabled:bg-gray-800 shadow-none active:scale-95"
+        >
+          <Send size={20} />
+        </button>
+      </form>
+      {isLoading && (
+        <button
+          onClick={onInterrupt}
+          className="p-4 bg-red-500/20 text-red-500 border border-red-500/30 rounded-2xl hover:bg-red-500 hover:text-white transition-all animate-pulse"
+          title="终止当前任务"
+        >
+          <Square size={20} fill="currentColor" />
+        </button>
+      )}
+    </div>
   );
 });
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const abortControllerRef = useRef(null);
   const [tasks, setTasks] = useState('');
   const [skills, setSkills] = useState({});
   const [outputs, setOutputs] = useState([]);
@@ -217,10 +229,26 @@ function App() {
     }
   };
 
+  const handleInterrupt = async () => {
+    try {
+      await axios.post('/api/interrupt');
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      setIsLoading(false);
+    } catch (err) {
+      console.error('Failed to interrupt:', err);
+    }
+  };
+
   const handleSendMessage = async (text) => {
     const userMessage = { role: 'user', content: text };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
+
+    // 创建新的中止控制器
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     let currentBotMessage = { role: 'bot', steps: [], finalAnswer: '', isComplete: false };
     setMessages((prev) => [...prev, currentBotMessage]);
@@ -230,6 +258,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
+        signal: controller.signal,
       });
 
       const reader = response.body.getReader();
@@ -274,7 +303,11 @@ function App() {
         }
       }
     } catch (err) {
-      console.error('Chat error:', err);
+      if (err.name === 'AbortError') {
+        console.log('Fetch aborted');
+      } else {
+        console.error('Chat error:', err);
+      }
     } finally {
       setIsLoading(false);
       fetchStatus();
@@ -384,17 +417,32 @@ function App() {
                         <div className="space-y-2 min-w-0">
                           {msg.steps.map((step, idx) => (
                             <div key={idx} className="group/step min-w-0">
-                                <details className="bg-gray-900/40 rounded-xl border border-gray-800/50 overflow-hidden transition-all" open={!msg.isComplete && idx === msg.steps.length - 1}>
+                                <details className="bg-gray-900/40 rounded-xl border border-gray-800/50 overflow-hidden transition-all">
                                     <summary className="px-3 py-2 text-[11px] text-gray-500 cursor-pointer hover:bg-gray-800/50 flex items-center justify-between select-none font-mono overflow-hidden">
                                         <div className="flex items-center gap-3">
                                             <div className={cn(
-                                                "w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold",
+                                                "w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-500",
+                                                (!msg.isComplete && idx === msg.steps.length - 1) ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-900 animate-bounce" : "",
                                                 step.executionResults.length > 0 ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30" : "bg-gray-800 text-gray-500"
                                             )}>
                                                 {step.id}
                                             </div>
-                                            <span className="uppercase tracking-widest font-bold opacity-70">
-                                                {step.executionResults.length > 0 ? "执行与观测" : "思考与规划"}
+                                            <span className="uppercase tracking-widest font-bold opacity-70 flex items-center gap-2">
+                                                {step.executionResults.length > 0 ? (
+                                                  (!msg.isComplete && idx === msg.steps.length - 1) ? (
+                                                    <>
+                                                      <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></span>
+                                                      正在执行任务...
+                                                    </>
+                                                  ) : "执行与观测"
+                                                ) : (
+                                                  (!msg.isComplete && idx === msg.steps.length - 1) ? (
+                                                    <>
+                                                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                                                      正在思考中...
+                                                    </>
+                                                  ) : "思考与规划"
+                                                )}
                                             </span>
                                         </div>
                                         <ChevronDown size={14} className="opacity-0 group-hover/step:opacity-100 transition-opacity" />
@@ -461,7 +509,7 @@ function App() {
           <div ref={chatEndRef} />
         </div>
         <div className="p-6 bg-gray-950/80 backdrop-blur-md border-t border-gray-800">
-          <ChatInput onSend={handleSendMessage} isLoading={isLoading} />
+          <ChatInput onSend={handleSendMessage} onInterrupt={handleInterrupt} isLoading={isLoading} />
         </div>
       </div>
     </div>
