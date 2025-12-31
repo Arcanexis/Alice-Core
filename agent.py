@@ -275,6 +275,15 @@ class AliceAgent:
             
         return "未知 toolkit 指令。用法: `toolkit list`, `toolkit info <skill_name>`, `toolkit refresh`"
 
+    def handle_todo(self, content):
+        """处理内置 todo 指令，在宿主机更新任务清单文件"""
+        try:
+            with open(self.todo_path, "w", encoding="utf-8") as f:
+                f.write(content.strip())
+            return "已成功更新宿主机任务清单 (memory/todo.md)。"
+        except Exception as e:
+            return f"更新任务清单失败: {str(e)}"
+
     def handle_memory(self, content, target="stm"):
         """处理内置 memory 指令，确保写入宿主机 memory/ 目录"""
         now = datetime.now()
@@ -364,10 +373,21 @@ class AliceAgent:
                     return self.handle_update_prompt(content)
                 return "错误: update_prompt 需要提供新的提示词内容。"
 
+            if cmd_strip.startswith("todo"):
+                content_match = re.search(r'["\'](.*?)["\']', cmd_strip, re.DOTALL)
+                if content_match:
+                    return self.handle_todo(content_match.group(1))
+                else:
+                    parts = cmd_strip.split(None, 1)
+                    if len(parts) > 1:
+                        content = parts[1].strip().strip('"\'')
+                        return self.handle_todo(content)
+                return "错误: todo 指令需要提供任务清单内容。"
+
             if cmd_strip.startswith("memory"):
                 # 极简解析: memory "content" [--ltm]
                 ltm_mode = "--ltm" in cmd_strip
-                content_match = re.search(r'["\'](.*?)["\']', cmd_strip)
+                content_match = re.search(r'["\'](.*?)["\']', cmd_strip, re.DOTALL)
                 if content_match:
                     return self.handle_memory(content_match.group(1), target="ltm" if ltm_mode else "stm")
                 else:
