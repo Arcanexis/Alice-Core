@@ -2,13 +2,25 @@ import re
 import subprocess
 import os
 import sys
+import logging
 from datetime import datetime, timedelta
 from openai import OpenAI
 import config
 from snapshot_manager import SnapshotManager
 
+# 配置运行时日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        logging.FileClipHandler('alice_runtime.log', mode='a', encoding='utf-8') if hasattr(logging, 'FileClipHandler') else logging.FileHandler('alice_runtime.log', mode='a', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger("AliceAgent")
+
 class AliceAgent:
     def __init__(self, model_name=None, prompt_path=None):
+        logger.info(f"正在初始化 AliceAgent (模型: {model_name or config.MODEL_NAME})")
         self.model_name = model_name or config.MODEL_NAME
         self.prompt_path = prompt_path or config.DEFAULT_PROMPT_PATH
         self.memory_path = config.MEMORY_FILE_PATH
@@ -101,6 +113,7 @@ class AliceAgent:
 
     def _refresh_context(self):
         """刷新上下文，分离人格设定 (System) 与记忆背景 (User)"""
+        logger.info("正在刷新上下文索引...")
         self.system_prompt = self._load_prompt()
         self.memory_content = self._load_file_content(self.memory_path, "暂无长期记忆。")
         self.stm_content = self._load_file_content(self.stm_path, "暂无近期记忆。")
@@ -422,9 +435,11 @@ class AliceAgent:
         return True, ""
 
     def execute_command(self, command, is_python_code=False):
+        logger.info(f"执行指令 ({'Python' if is_python_code else 'Bash'}): {command[:200]}...")
         # 0. 安全审查 (容器指令审查)
         is_safe, warning = self.is_safe_command(command)
         if not is_safe:
+            logger.warning(f"指令被安全审查拦截: {command}")
             return warning
 
         # 1. 拦截内置指令 (在宿主机本体执行)
@@ -491,9 +506,13 @@ class AliceAgent:
             
             output = result.stdout
             if result.stderr:
+                logger.error(f"指令执行产生标准错误: {result.stderr}")
                 output += f"\n[标准错误输出]:\n{result.stderr}"
             if result.returncode != 0:
+                logger.error(f"指令执行失败，返回码: {result.returncode}")
                 output += f"\n[执行失败，退出状态码: {result.returncode}]"
+            
+            logger.debug(f"指令执行结果回显长度: {len(output)}")
             return output if output else "[命令执行成功，无回显内容]"
         except subprocess.TimeoutExpired:
             return "错误: 执行超时。"
@@ -501,6 +520,7 @@ class AliceAgent:
             return f"执行过程中出错: {str(e)}"
 
     def chat(self, user_input):
+        logger.info(f"收到用户输入: {user_input[:100]}...")
         self.messages.append({"role": "user", "content": user_input})
         
         while True:
@@ -526,9 +546,11 @@ class AliceAgent:
                     c_chunk = getattr(delta, 'content', '')
                     
                     if t_chunk:
+                        logger.debug(f"Thinking Chunk: {t_chunk}")
                         print(t_chunk, end='', flush=True)
                         thinking_content += t_chunk
                     elif c_chunk:
+                        logger.debug(f"Content Chunk: {c_chunk}")
                         if not done_thinking:
                             print('\n\n' + "="*20 + " Alice 的回答 " + "="*20 + '\n')
                             done_thinking = True
@@ -560,4 +582,5 @@ class AliceAgent:
             # 刷新上下文
             self._refresh_context()
                 
+            logger.info("系统快照已更新，反馈给 Alice。")
             print(f"\n{'-'*40}\n系统快照已更新，结果已反馈给 Alice，继续生成中...")

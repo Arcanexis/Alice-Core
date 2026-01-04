@@ -14,4 +14,3 @@ memory/*.json
 *.log
 /target/
 Cargo.lock
-alice_debug.log

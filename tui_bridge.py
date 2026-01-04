@@ -2,7 +2,12 @@ import sys
 import json
 import io
 import os
+import logging
+import traceback
 from agent import AliceAgent
+
+# 配置桥接层日志
+logger = logging.getLogger("TuiBridge")
 
 # 强制切换到脚本所在目录（根目录）
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -11,9 +16,12 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
 def main():
+    logger.info("TUI Bridge 进程启动。")
     try:
         alice = AliceAgent()
     except Exception as e:
+        error_msg = f"初始化失败: {traceback.format_exc()}"
+        logger.error(error_msg)
         print(json.dumps({"type": "error", "content": f"Initialization failed: {str(e)}"}), flush=True)
         return
     
@@ -24,11 +32,14 @@ def main():
         try:
             line = sys.stdin.readline()
             if not line:
+                logger.info("接收到 EOF，退出主循环。")
                 break
             
             user_input = line.strip()
             if not user_input:
                 continue
+            
+            logger.info(f"收到 TUI 输入: {user_input}")
             
             alice.messages.append({"role": "user", "content": user_input})
             
@@ -45,6 +56,7 @@ def main():
                 thinking_content = ""
                 
                 # 发送开始思考信号
+                logger.info("开始流式请求 (chat.completions.create)...")
                 print(json.dumps({"type": "status", "content": "thinking"}), flush=True)
 
                 # 状态机，用于识别代码块并实现重定向
@@ -70,9 +82,12 @@ def main():
                         
                         if t_chunk:
                             thinking_content += t_chunk
+                            # 审计日志：记录原始 chunk
+                            logger.debug(f"Protocol Send [thinking]: {t_chunk}")
                             print(json.dumps({"type": "thinking", "content": t_chunk}), flush=True)
                         elif c_chunk:
                             full_content += c_chunk
+                            logger.debug(f"Protocol Send [content chunk]: {c_chunk}")
                             
                             # 将新内容追加到待处理缓冲区
                             pending_buffer += c_chunk
@@ -134,6 +149,7 @@ def main():
                 alice._update_working_memory(user_input, thinking_content, full_content)
 
                 if not python_codes and not bash_commands:
+                    logger.info("回复完成，未检测到工具调用。")
                     # 过滤掉 full_content 中的代码块再存入 messages，防止 UI 重复渲染（或者保持完整，UI 渲染时再处理）
                     # 这里保持消息完整性，但 UI 由于我们上面分流发送，已经实现了“代码块在侧边栏”的效果
                     alice.messages.append({"role": "assistant", "content": full_content})
@@ -160,10 +176,13 @@ def main():
                 alice._refresh_context()
                 
         except EOFError:
+            logger.info("接收到 EOFError。")
             break
         except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"TUI Bridge 运行时异常:\n{error_trace}")
             # 捕获所有运行时错误并通过 JSON 传回，而不是直接打印
-            print(json.dumps({"type": "error", "content": str(e)}), flush=True)
+            print(json.dumps({"type": "error", "content": f"Runtime Error: {str(e)}. 请查看 alice_runtime.log"}), flush=True)
             break
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
-    fs::File,
     io::{self, BufRead, BufReader, Write},
     process::{Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
@@ -161,10 +160,6 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // 0. 准备日志文件
-    let mut log_file = File::create("alice_debug.log")?;
-    writeln!(log_file, "--- Alice Debug Log Start ---")?;
-
     // 1. 启动 Python 桥接层
     let mut child = Command::new("python3")
         .arg("./tui_bridge.py")
@@ -193,15 +188,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    // 启动线程读取 stderr 并写入日志文件
+    // 启动线程读取 stderr
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        let mut log_file_app = File::options().append(true).open("alice_debug.log").unwrap();
         for line in reader.lines() {
             if let Ok(l) = line {
                 if !l.trim().is_empty() {
-                    let _ = writeln!(log_file_app, "[STDERR] {}", l);
-                    let _ = tx_err.send(BridgeMessage::Error { content: format!("Backend Error: Check alice_debug.log") });
+                    // 只发送错误信号，详细堆栈已由 Python 侧写入 alice_runtime.log
+                    let _ = tx_err.send(BridgeMessage::Error { content: format!("Backend stderr: {}", l) });
                 }
             }
         }
@@ -267,14 +261,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     app.completion_tokens = completion;
                 }
                 BridgeMessage::Error { content } => {
-                    if content.contains("Backend Error") {
-                        app.messages.push(Message {
-                            author: Author::Assistant,
-                            thinking: String::new(),
-                            content: format!("⚠️ {}", content),
-                            is_complete: true,
-                        });
-                    }
+                    app.messages.push(Message {
+                        author: Author::Assistant,
+                        thinking: String::new(),
+                        content: format!("⚠️ {}", content),
+                        is_complete: true,
+                    });
                 }
             }
         }
