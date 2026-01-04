@@ -8,6 +8,13 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 
 ---
 
+## 效果展示
+
+![Showcase 1](assets/showcase1.png)
+![Showcase 2](assets/showcase2.png)
+
+---
+
 ## 1. 技术架构
 
 项目采用“Rust 终端界面 + Python 核心引擎 + 容器化沙盒”的三层隔离架构。
