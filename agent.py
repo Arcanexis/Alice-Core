@@ -163,13 +163,14 @@ class AliceAgent:
         if not self.messages:
             self.messages = [system_msg, memory_msg]
         else:
-            # 确保前两条是系统和记忆
-            self.messages[0] = system_msg
-            if len(self.messages) > 1 and self.messages[1].get("role") == "user" and "【记忆与背景信息注入】" in self.messages[1].get("content", ""):
-                self.messages[1] = memory_msg
-            else:
-                # 插入记忆消息
-                self.messages.insert(1, memory_msg)
+            # 核心优化：截断原始历史，防止上下文爆炸
+            # 仅保留最近的 4 条原始对话（约 2 轮），旧的历史由 Summarized Memory (messages[1]) 覆盖
+            recent_raw_messages = [m for m in self.messages if "【记忆与背景信息注入】" not in str(m.get("content", ""))]
+            if len(recent_raw_messages) > 4:
+                recent_raw_messages = recent_raw_messages[-4:]
+            
+            # 重新组装：System(0) + Memory Context(1) + Recent Raw(2+)
+            self.messages = [system_msg, memory_msg] + [m for m in recent_raw_messages if m.get("role") != "system"]
 
     def _load_prompt(self):
         try:
