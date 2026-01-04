@@ -180,11 +180,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 启动线程读取 stderr 并写入日志文件
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        let mut log_file = File::options().append(true).open("alice_debug.log").unwrap();
+        let mut log_file_app = File::options().append(true).open("alice_debug.log").unwrap();
         for line in reader.lines() {
             if let Ok(l) = line {
                 if !l.trim().is_empty() {
-                    let _ = writeln!(log_file, "[STDERR] {}", l);
+                    let _ = writeln!(log_file_app, "[STDERR] {}", l);
                     let _ = tx_err.send(BridgeMessage::Error { content: format!("Backend Error: Check alice_debug.log") });
                 }
             }
@@ -348,7 +348,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(10),   // Messages
+            Constraint::Min(10),   // Main Area
             Constraint::Length(3), // Input
         ])
         .split(f.size());
@@ -384,8 +384,30 @@ fn ui(f: &mut Frame, app: &mut App) {
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);
 
-    // 2. Message History (分段渲染)
-    render_messages(f, app, chunks[1]);
+    // 2. Main Area (Split Chat and Sidebar)
+    let main_chunks = if app.show_thinking {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(75),
+                Constraint::Percentage(25),
+            ])
+            .split(chunks[1])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(100),
+                Constraint::Percentage(0),
+            ])
+            .split(chunks[1])
+    };
+
+    render_messages(f, app, main_chunks[0]);
+
+    if app.show_thinking {
+        render_sidebar(f, app, main_chunks[1]);
+    }
 
     // 3. Input Box
     let input_title = if app.status == AgentStatus::Idle {
@@ -400,7 +422,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_widget(input, chunks[2]);
 
     if app.status == AgentStatus::Idle {
-        let input_width = get_text_width(&app.input);
+        let input_width = unicode_width::UnicodeWidthStr::width(app.input.as_str());
         f.set_cursor(
             chunks[2].x + input_width as u16 + 1,
             chunks[2].y + 1,
@@ -410,7 +432,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 
 fn render_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let mut message_items = Vec::new();
-    let width = area.width as usize;
+    let width = area.width.saturating_sub(4) as usize;
 
     for m in &app.messages {
         let (name, color) = match m.author {
@@ -423,35 +445,24 @@ fn render_messages(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(name, Style::default().fg(color).add_modifier(Modifier::BOLD)),
         ])));
 
-        // 2. 思考过程
-        if app.show_thinking && !m.thinking.is_empty() {
-            let thinking_lines = format_text_to_lines(&m.thinking, width.saturating_sub(4));
-            for line in thinking_lines {
-                message_items.push(ListItem::new(Line::from(vec![
-                    Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(line, Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
-                ])));
-            }
-        }
-
-        // 3. 正文
-        let content_text = if m.content.is_empty() && !m.is_complete {
+        // 2. 正文 (由于思考过程移到了侧边栏，这里不再渲染它)
+        let content_text = if m.content.is_empty() && !m.is_complete && m.author == Author::Assistant {
             format!("{} 正在处理中...", app.get_spinner())
         } else {
             m.content.clone()
         };
 
-        let content_lines = format_text_to_lines(&content_text, width.saturating_sub(2));
+        let content_lines = format_text_to_lines(&content_text, width);
         for line in content_lines {
             message_items.push(ListItem::new(Line::from(line)));
         }
 
-        // 4. 分隔空行
+        // 3. 分隔空行
         message_items.push(ListItem::new(""));
     }
 
     let total_lines = message_items.len();
-    let list_height = area.height as usize - 2; // 减去边框
+    let list_height = area.height.saturating_sub(2) as usize;
 
     // 自动置底逻辑
     if app.auto_scroll {
@@ -461,12 +472,11 @@ fn render_messages(f: &mut Frame, app: &mut App, area: Rect) {
             app.scroll_offset = 0;
         }
     } else {
-        // 限制手动滚动的范围
         if total_lines > list_height {
             let max_scroll = total_lines - list_height;
             if app.scroll_offset > max_scroll {
                 app.scroll_offset = max_scroll;
-                app.auto_scroll = true; // 滚到底了，恢复自动滚动
+                app.auto_scroll = true; 
             }
         } else {
             app.scroll_offset = 0;
@@ -474,28 +484,36 @@ fn render_messages(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // 更新 ListState 以支持滚动显示
-    // 注意：Ratatui List 组件通过渲染时的 state 控制偏移。
-    // 但在 List 组件中，scroll 是一个逻辑偏移。
-    // 这里我们直接使用 List 自己的 offset 机制（如果可用）或重新计算 items。
-    
-    // 重新根据 scroll_offset 裁剪显示内容是一种方法，或者使用 List::default().scroll()
-    // 但 0.26.x 的 List 没有 .scroll() 方法，通常使用 ListState 的 offset
-    
     let history = List::new(message_items)
         .block(Block::default().title(" 对话历史 ").borders(Borders::ALL));
     
-    // 技巧：利用 ListState 的 offset 内部机制
-    // 我们手动控制渲染哪些 items 往往更可靠
-    f.render_stateful_widget(history, area, &mut app.list_state);
-    
-    // 强制设置 state 的 offset (hack for old ratatui)
     *app.list_state.offset_mut() = app.scroll_offset;
+    f.render_stateful_widget(history, area, &mut app.list_state);
 }
 
-/// 文本宽度计算（支持中文）
-fn get_text_width(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
+fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    // 获取最新的思考过程
+    let current_thinking = app.messages.iter().rev()
+        .find(|m| !m.thinking.is_empty())
+        .map(|m| m.thinking.as_str())
+        .unwrap_or("暂无思考过程...");
+
+    let sidebar_title = if app.status == AgentStatus::Thinking {
+        format!(" 💭 {} ", app.get_spinner())
+    } else {
+        " 💭 ".to_string()
+    };
+
+    let style = Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC);
+
+    let thinking_paragraph = Paragraph::new(current_thinking)
+        .style(style)
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .block(Block::default()
+            .title(sidebar_title)
+            .borders(Borders::ALL));
+
+    f.render_widget(thinking_paragraph, area);
 }
 
 /// 简易手动文本换行辅助函数
