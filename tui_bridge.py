@@ -6,6 +6,7 @@ import logging
 import traceback
 import threading
 import queue
+import re
 from agent import AliceAgent
 
 # 配置桥接层日志
@@ -105,8 +106,6 @@ class StreamManager:
                     output_msgs.append({"type": "thinking", "content": self.buffer[:thinking_end]})
                     self.buffer = self.buffer[thinking_end:]
                     self.in_code_block = False
-        
-        return output_msgs
         
         return output_msgs
 
@@ -263,7 +262,6 @@ def main():
                         print(json.dumps(msg), flush=True)
 
                 # 检查工具调用
-                import re
                 python_codes = re.findall(r'```python\s*\n?(.*?)\s*```', full_content, re.DOTALL)
                 bash_commands = re.findall(r'```bash\s*\n?(.*?)\s*```', full_content, re.DOTALL)
                 

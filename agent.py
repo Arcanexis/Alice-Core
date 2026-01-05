@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileClipHandler('alice_runtime.log', mode='a', encoding='utf-8') if hasattr(logging, 'FileClipHandler') else logging.FileHandler('alice_runtime.log', mode='a', encoding='utf-8')
+        logging.FileHandler('alice_runtime.log', mode='a', encoding='utf-8')
     ]
 )
 logger = logging.getLogger("AliceAgent")
