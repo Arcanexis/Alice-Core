@@ -480,6 +480,16 @@ class AliceAgent:
                         content = parts[1].replace("--ltm", "").strip().strip('"\'')
                         return self.handle_memory(content, target="ltm" if ltm_mode else "stm")
 
+            # 拦截 cat skills/* 命令，使用宿主机缓存读取（性能优化）
+            cat_match = re.match(r'cat\s+skills/(.+)', cmd_strip)
+            if cat_match:
+                file_path = cat_match.group(1)
+                content = self.snapshot_mgr.read_skill_file(file_path)
+                if content is not None:
+                    logger.info(f"通过宿主机缓存读取技能文件: skills/{file_path}")
+                    return content
+                # 如果缓存读取失败，继续走 Docker exec 流程
+
         # 2. 准备 Docker 执行指令 (采用 List 模式避免 Shell 转义陷阱)
         display_name = "Docker 常驻容器"
         full_command = [
