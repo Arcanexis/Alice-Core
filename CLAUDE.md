@@ -33,6 +33,12 @@ cargo build --release
 
 **Note**: The project uses Rust edition 2024 (released February 2025 with Rust 1.85). Ensure your Rust toolchain is up to date (`rustup update`).
 
+**Important constraints**:
+- Rust TUI spawns Python subprocess via `subprocess.Popen()` - if bridge crashes, entire system fails (no watchdog)
+- `tui_bridge.py` must be executable from current working directory (hardcoded path in `main.rs:165`)
+- JSON protocol is **line-buffered** - Python must call `sys.stdout.flush()` after each message
+- Subprocess communication is **synchronous** - TUI blocks on Python response
+
 ### Docker Management
 
 ```bash
@@ -88,6 +94,7 @@ docker rmi alice-sandbox:latest
    - Persistent container (`alice-sandbox-instance`) with volume mounts
    - Only mounts `skills/` and `alice_output/` (isolates prompts, memory, source code)
    - All task execution happens inside this container
+   - **Security note**: Container currently runs as root inside (no `USER` directive in Dockerfile)
 
 ### Communication Protocol
 
@@ -209,6 +216,8 @@ The TUI renders thinking content in a sidebar (toggled with Ctrl+O). Thinking se
 
 Content sections appear in the main chat area.
 
+**Important**: The `StreamManager` uses a **10MB buffer limit** (tui_bridge.py:29-34) to prevent OOM. If responses exceed this, older content is discarded. Consider this when generating large outputs.
+
 ### Memory Pruning Strategy
 
 When Working Memory exceeds `WORKING_MEMORY_MAX_ROUNDS`:
@@ -218,12 +227,51 @@ When Working Memory exceeds `WORKING_MEMORY_MAX_ROUNDS`:
 4. Delete processed rounds from Working Memory
 5. Log operation to `alice_runtime.log`
 
+## Critical Implementation Patterns
+
+### Command Safety and Validation
+
+The `is_safe_command()` method in `agent.py:431-436` provides **basic** command filtering:
+- Currently only blocks `rm` commands
+- Does NOT protect against: path traversal, privilege escalation, resource exhaustion, or compound commands
+- When modifying security logic, test thoroughly as this is the primary defense layer
+
+**Security Boundary**: Commands execute inside Docker container with `docker exec`, NOT on host. The container should run as non-root user (current Dockerfile lacks `USER` directive).
+
+### Built-in Command Interception Pattern
+
+Commands are intercepted in `execute_command()` (agent.py:438-496) **before** LLM calls:
+1. Check `is_safe_command()` first
+2. Match against built-in command prefixes (`toolkit`, `update_prompt`, `todo`, `memory`)
+3. Extract arguments using regex (`re.search(r'["\'](.?)["\']')`)
+4. Execute on host (not in container)
+5. Return result immediately without Docker exec
+
+When adding new built-in commands, follow this interception pattern at agent.py:446-496.
+
+### Error Handling Philosophy
+
+The codebase uses **broad exception catching** (`except Exception as e`) in 9+ locations for simplicity. When debugging:
+- Check `alice_runtime.log` for detailed tracebacks
+- Most errors are logged but don't crash the system (graceful degradation)
+- Critical failures (Docker missing, API key invalid) cause immediate exit via `sys.exit(1)`
+
+### Stream Processing State Machine
+
+`StreamManager` (tui_bridge.py:15-124) maintains critical state across chunk boundaries:
+- `in_code_block`: Tracks whether currently inside triple backticks
+- `current_end_tag`: Dynamically switches between `</thought>`, `</reasoning>`, `</thinking>`, or triple backticks
+- **Buffer retention logic** (lines 93-118): Preserves partial tag matches to prevent splitting across boundaries
+
+When modifying stream parsing, test with fragmented responses (partial tags at chunk boundaries).
+
 ## Special Workflow Notes
 
 - **Alice Personality**: The system prompt (`prompts/alice.md`) defines a self-improving agent persona that actively uses memory commands and self-reflection
 - **Persona Update**: Alice can modify her own system prompt via `update_prompt` command
-- **Skill Development**: Follow `agent-skills-spec_cn.md` for skill creation guidelines
+- **Skill Development**: Follow `agent-skills-spec_cn.md` for skill creation guidelines (YAML frontmatter: `name`, `description` required; `license`, `allowed-tools`, `metadata` optional)
 - **Docker Isolation**: Source code, prompts, and memory files are NOT mounted in the container - only skills and output directory
+- **AI-Generated Disclaimer**: Per README.md, all code is AI-generated. Users must evaluate security risks and logic defects before deployment
 
 ## Common Development Tasks
 
@@ -258,3 +306,73 @@ The `tui_bridge.py` module runs as a subprocess spawned by the Rust TUI:
 - Handles stdin (user messages) → agent processing → stdout (JSON responses)
 - Run manually for debugging: `python tui_bridge.py` (reads from stdin, outputs JSON)
 - Check `alice_runtime.log` for Python-side logs from both `AliceAgent` and `TuiBridge` loggers
+
+### Debugging Workflow
+
+**Common debugging scenarios**:
+
+1. **TUI rendering issues**: Check Rust panic messages in terminal, review `src/main.rs` UI layout logic
+2. **Stream parsing problems**: Enable verbose logging in `tui_bridge.py`, inspect `StreamManager` buffer state
+3. **Docker execution failures**: Verify container is running (`docker ps -a --filter name=alice-sandbox-instance`), check container logs (`docker logs alice-sandbox-instance`)
+4. **Memory system issues**: Manually inspect files in `memory/` directory, verify date formats match `## YYYY-MM-DD` pattern
+5. **Skill not loading**: Run `toolkit refresh` in TUI, check `alice_runtime.log` for `SnapshotManager` errors
+
+**Log locations**:
+- Python logs: `alice_runtime.log` (both `AliceAgent` and `TuiBridge` loggers)
+- Container stdout: Captured inline in tool execution responses
+- Rust panics: Printed to terminal stderr
+
+### Rust Development
+
+**No testing framework configured**. To add tests:
+```bash
+# Add tests in src/main.rs or create tests/ directory
+cargo test
+
+# Run with clippy for lints (not configured by default)
+cargo clippy
+
+# Format code (no .rustfmt.toml configured)
+cargo fmt
+```
+
+**Key Rust patterns used**:
+- `Result<(), Box<dyn Error>>` for error propagation
+- `mpsc::channel()` for thread-safe TUI ↔ subprocess communication
+- `Mutex<Arc<T>>` for shared interrupt flag (`app.interrupted`)
+
+### Python Development
+
+**No testing framework configured**. To add tests:
+```bash
+# Install pytest (not in requirements.txt)
+pip install pytest
+
+# Create tests/ directory and run
+pytest tests/
+
+# Type checking (mypy not configured)
+pip install mypy
+mypy agent.py tui_bridge.py
+```
+
+**Critical Python patterns**:
+- `subprocess.Popen()` used in `main.rs:165` to spawn `tui_bridge.py`
+- `sys.stdout.flush()` required after each JSON message for TUI to receive immediately
+- Context managers (`with open()`) used inconsistently - some file operations use manual `close()`
+
+### Container Environment Inspection
+
+```bash
+# Shell into running container
+docker exec -it alice-sandbox-instance bash
+
+# Check Python environment
+docker exec alice-sandbox-instance python --version
+
+# List installed packages
+docker exec alice-sandbox-instance pip list
+
+# Test skill script directly
+docker exec alice-sandbox-instance python /workspace/skills/my-skill/script.py
+```
